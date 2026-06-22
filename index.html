@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Popjablues playlist-opmaker</title>
+<style>
+  :root { --bg:#faf9f7; --card:#fff; --line:#e3e0da; --ink:#222; --muted:#777;
+          --accent:#b5462e; --accent-d:#933a25; --ok:#2e7d32; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background:var(--accent); color:#fff; padding:18px 20px; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; opacity:.9; font-size:14px; }
+  main { max-width:920px; margin:0 auto; padding:20px; }
+  .step { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:16px; margin:0 0 18px; }
+  .step h2 { margin:0 0 4px; font-size:15px; }
+  .step h2 .n { display:inline-block; min-width:24px; height:24px; line-height:24px;
+                text-align:center; background:var(--accent); color:#fff; border-radius:50%;
+                font-size:13px; margin-right:8px; }
+  .hint { color:var(--muted); font-size:13px; margin:0 0 10px; }
+  #drop { min-height:120px; border:2px dashed var(--line); border-radius:8px; padding:12px;
+          background:#fff; outline:none; }
+  #drop.empty:before { content:attr(data-ph); color:#aaa; }
+  #drop.drag { border-color:var(--accent); background:#fff7f4; }
+  textarea { width:100%; min-height:230px; border:1px solid var(--line); border-radius:8px;
+             padding:12px; font:14px/1.55 "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+             resize:vertical; }
+  .preview { border:1px solid var(--line); border-radius:8px; padding:14px 18px; background:#fff;
+             min-height:80px; }
+  .preview h1 { font-size:18px; color:var(--accent-d); margin:16px 0 8px; }
+  .preview h1:first-child { margin-top:0; }
+  .preview p { margin:0 0 12px; }
+  .htmlbox { width:100%; min-height:160px; border:1px solid var(--line); border-radius:8px;
+             padding:12px; font:13px/1.5 "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+             background:#1e1e1e; color:#d7d7d7; resize:vertical; white-space:pre; overflow:auto; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:9px 16px;
+           font-size:14px; cursor:pointer; }
+  button:hover { background:var(--accent-d); }
+  button.ghost { background:#eee; color:#333; }
+  button.ghost:hover { background:#e0e0e0; }
+  .count { color:var(--muted); font-size:13px; }
+  .ok { color:var(--ok); font-size:13px; font-weight:600; }
+  label.opt { font-size:13px; color:#444; display:inline-flex; align-items:center; gap:5px; }
+  footer { color:var(--muted); font-size:12px; text-align:center; padding:0 20px 30px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Popjablues playlist-opmaker</h1>
+  <p>Plak je playlist uit Word → kant-en-klare HTML voor Nieuwsned.</p>
+</header>
+
+<main>
+  <section class="step">
+    <h2><span class="n">1</span>Plak de playlist uit Word</h2>
+    <p class="hint">Selecteer in Word de hele playlist-tabel (of het hele document), kopieer (Ctrl-C)
+       en plak hieronder (Ctrl-V). Jingles en kopregels worden automatisch weggelaten.</p>
+    <div id="drop" class="empty" contenteditable="true" data-ph="Plak hier…"></div>
+    <div class="row">
+      <button id="clear" class="ghost" type="button">Leegmaken</button>
+      <span id="parseInfo" class="count"></span>
+    </div>
+  </section>
+
+  <section class="step">
+    <h2><span class="n">2</span>Gecontroleerde lijst <span class="count">— pas hier aan indien nodig</span></h2>
+    <p class="hint">Eén regel per nummer: <code>1. Artiest - Titel - Jaar</code>.
+       Een regel zónder nummer (zoals “Tijd voor de 90-jaren”) wordt een kopje.
+       Wijzigingen werken meteen door in het voorbeeld en de HTML.</p>
+    <textarea id="text" spellcheck="false" placeholder="Hier verschijnt de opgeschoonde lijst na het plakken…"></textarea>
+    <div class="row">
+      <label class="opt"><input type="checkbox" id="boldArtist" checked /> Artiest vet</label>
+      <button id="copyText" class="ghost" type="button">Kopieer tekst</button>
+    </div>
+  </section>
+
+  <section class="step">
+    <h2><span class="n">3</span>Voorbeeld</h2>
+    <div id="preview" class="preview"></div>
+  </section>
+
+  <section class="step">
+    <h2><span class="n">4</span>HTML om in Nieuwsned te plakken</h2>
+    <p class="hint">Klik op <b>Kopieer HTML</b> en plak het in de Nieuwsned-editor.</p>
+    <textarea id="html" class="htmlbox" spellcheck="false" readonly></textarea>
+    <div class="row">
+      <button id="copyHtml" type="button">Kopieer HTML</button>
+      <span id="copied" class="ok" hidden>Gekopieerd ✓</span>
+    </div>
+  </section>
+</main>
+
+<footer>JavaScript-only · geen installatie · werkt offline in de browser.</footer>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * 1. Parse a pasted Word table (HTML) -> ordered items.
+ *    items: {type:'track', artist, title, year} | {type:'heading', text}
+ * ------------------------------------------------------------------ */
+function clean(s) {
+  return (s || "").replace(/ /g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Strip the trailing "/2", "/40.00", "/2" etc. and tidy a "Tijd voor …" marker.
+function cleanHeading(s) {
+  return clean(s).replace(/\s*\/.*$/, "").replace(/\s*\(.*\)\s*$/, "").trim();
+}
+
+function isYear(s)   { return /^(19|20)\d{2}$/.test(s); }
+function isNumber(s) { return /^\d{1,3}[.)]?$/.test(s); }
+function isNoise(s)  { return /^(jingle|tune|jingles)$/i.test(s); }
+
+function parseWordHtml(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  // Leaf rows only: a <tr> that does not itself contain a nested <table>
+  // (so the outer wrapper rows around nested tables are skipped, their inner
+  //  rows are read instead).
+  const rows = Array.from(doc.querySelectorAll("tr"))
+    .filter(tr => !tr.querySelector("table"));
+
+  const items = [];
+  for (const tr of rows) {
+    const cells = Array.from(tr.children)
+      .filter(el => /^t[dh]$/i.test(el.tagName))
+      .map(td => clean(td.textContent));
+    if (!cells.some(Boolean)) continue;
+
+    // Section marker hidden in a jingle row, e.g. a cell "Tijd voor de 90-jaren/2".
+    // Use the matching cell itself (not the whole row) so neighbouring cells
+    // (MJ1, 0.12, …) aren't swallowed into the heading.
+    const hcell = cells.find(c => /^tijd voor/i.test(c));
+    if (hcell) {
+      const txt = cleanHeading(hcell);
+      if (txt) items.push({ type: "heading", text: txt });
+      continue;
+    }
+
+    // Track row: find a number cell, then artist / title after it.
+    const numIdx = cells.findIndex(isNumber);
+    if (numIdx === -1) continue;
+    const after = cells.slice(numIdx + 1).filter(Boolean);
+    const artist = after[0] || "";
+    if (!artist || isNoise(artist)) continue;          // jingle/tune or empty → skip
+    const title = after[1] || "";
+    let year = "";
+    for (const c of cells) if (isYear(c)) year = c;     // last year-looking cell wins
+    items.push({ type: "track", artist, title, year });
+  }
+  return items;
+}
+
+// Fallback for a plain-text (tab-separated) paste of a Word table.
+function parseTsv(text) {
+  const items = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const cells = raw.split("\t").map(clean);
+    if (!cells.some(Boolean)) continue;
+    const hcell = cells.find(c => /^tijd voor/i.test(c));
+    if (hcell) {
+      const txt = cleanHeading(hcell);
+      if (txt) items.push({ type: "heading", text: txt });
+      continue;
+    }
+    const numIdx = cells.findIndex(isNumber);
+    if (numIdx === -1) continue;
+    const after = cells.slice(numIdx + 1).filter(Boolean);
+    const artist = after[0] || "";
+    if (!artist || isNoise(artist)) continue;
+    const title = after[1] || "";
+    let year = "";
+    for (const c of cells) if (isYear(c)) year = c;
+    items.push({ type: "track", artist, title, year });
+  }
+  return items;
+}
+
+// Ordered items -> the editable popjablues-format text.
+function itemsToText(items) {
+  const out = ["De playlist van deze Popjablues"];
+  let n = 0;
+  for (const it of items) {
+    if (it.type === "heading") {
+      out.push(it.text);
+    } else {
+      n++;
+      let s = n + ". " + it.artist;
+      if (it.title) s += " - " + it.title;
+      if (it.year)  s += " - " + it.year;
+      out.push(s);
+    }
+  }
+  out.push(OUTRO);
+  return out.join("\n");
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. Parse the editable text (popjablues format) -> {intro, items}.
+ * ------------------------------------------------------------------ */
+function parsePlaylistText(text) {
+  const intro = [];
+  const items = [];
+  let started = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = clean(raw);
+    if (!line) continue;
+    const m = line.match(/^(\d{1,3})[.)]\s*(.*)$/);
+    if (m) {
+      started = true;
+      let rest = m[2];
+      let year = "";
+      const ym = rest.match(/[-–—]?\s*((?:19|20)\d{2})\s*$/);
+      if (ym) { year = ym[1]; rest = rest.slice(0, ym.index).trim(); }
+      rest = rest.replace(/[-–—]\s*$/, "").trim();
+      let artist = rest, title = "";
+      const dm = rest.match(/^(.*?)\s*[-–—]\s*(.*)$/);
+      if (dm) { artist = clean(dm[1]); title = clean(dm[2]); }
+      items.push({ type: "track", artist, title, year });
+    } else if (/^popjablues wordt elke vrijdag/i.test(line)) {
+      items.push({ type: "outro", text: line });
+    } else if (!started) {
+      intro.push(line);
+    } else {
+      items.push({ type: "heading", text: line });
+    }
+  }
+  return { intro, items };
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. Render {intro, items} -> basic HTML (paragraphs, <br>, bold, h1).
+ * ------------------------------------------------------------------ */
+function esc(s) {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Fixed broadcast line that every playlist ends with.
+const OUTRO = "Popjablues wordt elke vrijdag van 18.00-20.00 uur uitgezonden";
+
+function toHtml(parsed, opts) {
+  const out = [];
+  if (parsed.intro.length) {
+    out.push("<h1>" + esc(parsed.intro.join(" ")) + "</h1>");
+  }
+  let n = 0, buf = [], hasOutro = false;
+  const flush = () => { if (buf.length) { out.push("<p>" + buf.join("<br>\n") + "</p>"); buf = []; } };
+  for (const it of parsed.items) {
+    if (it.type === "heading") {
+      flush();
+      out.push("<p><b><i>" + esc(it.text) + "</i></b></p>");   // "Tijd voor …" = bold italic
+    } else if (it.type === "outro") {
+      flush();
+      hasOutro = true;
+      out.push("<p><b>" + esc(it.text) + "</b></p>");
+    } else {
+      n++;
+      const name = opts.boldArtist ? "<b>" + esc(it.artist) + "</b>" : esc(it.artist);
+      let line = n + ". " + name;
+      if (it.title) line += " - " + esc(it.title);
+      if (it.year)  line += " - " + esc(it.year);
+      buf.push(line);
+    }
+  }
+  flush();
+  if (!hasOutro) out.push("<p><b>" + esc(OUTRO) + "</b></p>");  // always end with the broadcast line (bold)
+  return out.join("\n");
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. Wire up the UI.
+ * ------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+const drop = $("drop"), textEl = $("text"), previewEl = $("preview"),
+      htmlEl = $("html"), parseInfo = $("parseInfo");
+
+function currentOpts() {
+  return { boldArtist: $("boldArtist").checked };
+}
+
+function refresh() {
+  const parsed = parsePlaylistText(textEl.value);
+  const opts = currentOpts();
+  const html = toHtml(parsed, opts);
+  previewEl.innerHTML = html || "<p style='color:#aaa'>Nog niets om te tonen.</p>";
+  htmlEl.value = html;
+  const tracks = parsed.items.filter(i => i.type === "track").length;
+  const heads = parsed.items.filter(i => i.type === "heading").length;
+  parseInfo.textContent = tracks
+    ? tracks + " nummers" + (heads ? ", " + heads + " kopjes" : "") + " herkend"
+    : "";
+}
+
+function handlePaste(e) {
+  const cd = e.clipboardData || window.clipboardData;
+  if (!cd) return;                       // let the browser handle it
+  const html = cd.getData("text/html");
+  const plain = cd.getData("text/plain");
+  let items = [];
+  if (html && /<t[dr]/i.test(html)) items = parseWordHtml(html);
+  if (!items.length && plain)        items = parseTsv(plain);
+  if (items.length) {
+    e.preventDefault();
+    textEl.value = itemsToText(items);
+    drop.classList.remove("empty");
+    drop.textContent = "✓ " + items.filter(i => i.type === "track").length +
+                       " nummers geplakt — zie stap 2.";
+    refresh();
+    textEl.focus();
+  }
+  // else: not a recognised table — leave the paste in the box so the user sees it.
+}
+
+drop.addEventListener("paste", handlePaste);
+drop.addEventListener("input", () => {
+  drop.classList.toggle("empty", clean(drop.textContent) === "");
+});
+$("clear").addEventListener("click", () => {
+  drop.textContent = ""; drop.classList.add("empty");
+  textEl.value = ""; parseInfo.textContent = ""; refresh();
+});
+
+textEl.addEventListener("input", refresh);
+$("boldArtist").addEventListener("change", refresh);
+
+function copy(text, btnNote) {
+  const done = () => { btnNote.hidden = false; setTimeout(() => btnNote.hidden = true, 1600); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else { fallbackCopy(text, done); }
+}
+function fallbackCopy(text, done) {
+  const t = document.createElement("textarea");
+  t.value = text; document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); done(); } catch (_) {}
+  document.body.removeChild(t);
+}
+$("copyHtml").addEventListener("click", () => copy(htmlEl.value, $("copied")));
+$("copyText").addEventListener("click", () => copy(textEl.value, $("copied")));
+
+refresh();
+</script>
+</body>
+</html>
