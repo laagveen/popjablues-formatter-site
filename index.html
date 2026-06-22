@@ -275,7 +275,7 @@ const OUTRO = "Popjablues wordt elke vrijdag van 18.00-20.00 uur uitgezonden";
 function toHtml(parsed, opts) {
   const out = [];
   if (parsed.intro.length) {
-    out.push("<h1>" + esc(parsed.intro.join(" ")) + "</h1>");
+    out.push("<p><b>" + esc(parsed.intro.join(" ")) + "</b></p>");   // titel: alleen bold, geen header
   }
   let n = 0, buf = [], hasOutro = false;
   const flush = () => { if (buf.length) { out.push("<p>" + buf.join("<br>\n") + "</p>"); buf = []; } };
