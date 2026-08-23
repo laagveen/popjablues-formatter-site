@@ -45,6 +45,10 @@
   .count { color:var(--muted); font-size:13px; }
   .ok { color:var(--ok); font-size:13px; font-weight:600; }
   label.opt { font-size:13px; color:#444; display:inline-flex; align-items:center; gap:5px; }
+  .field { margin-top:12px; }
+  .flabel { display:block; font-size:13px; color:#444; margin-bottom:4px; }
+  input.txt { width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:8px;
+              padding:9px 12px; font:14px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif; }
   ol.guide { margin:0; padding-left:22px; }
   ol.guide > li { margin:0 0 20px; }
   ol.guide > li:last-child { margin-bottom:0; }
@@ -78,16 +82,26 @@
     <h2><span class="n">2</span>Gecontroleerde lijst <span class="count">— pas hier aan indien nodig</span></h2>
     <p class="hint">Eén regel per nummer: <code>1. Artiest - Titel - Jaar</code>.
        Een regel zónder nummer (zoals “Tijd voor de 90-jaren”) wordt een kopje.
-       Wijzigingen werken meteen door in het voorbeeld en de HTML.</p>
+       Wijzigingen werken meteen door in het voorbeeld en de HTML.
+       Deze lijst kun je met <b>Kopieer tekst</b> ook rechtstreeks in de popjablues-editor plakken.</p>
     <textarea id="text" spellcheck="false" placeholder="Hier verschijnt de opgeschoonde lijst na het plakken…"></textarea>
     <div class="row">
-      <label class="opt"><input type="checkbox" id="boldArtist" checked /> Artiest vet</label>
       <button id="copyText" class="ghost" type="button">Kopieer tekst</button>
     </div>
   </section>
 
   <section class="step">
     <h2><span class="n">3</span>Voorbeeld</h2>
+    <p class="hint">Optionele in- en afsluitende tekst voor de HTML-uitvoer (komt niet in de lijst hierboven).</p>
+    <label class="opt"><input type="checkbox" id="boldArtist" checked /> Artiest vet</label>
+    <div class="field">
+      <label class="flabel" for="introText">Inleidende tekst</label>
+      <input type="text" id="introText" class="txt" placeholder="Optioneel — bijv. een introzin boven de lijst" />
+    </div>
+    <div class="field">
+      <label class="flabel" for="outroText">Afsluitende tekst</label>
+      <input type="text" id="outroText" class="txt" value="Popjablues wordt elke vrijdag van 18.00-20.00 uur uitgezonden" />
+    </div>
     <div id="preview" class="preview"></div>
   </section>
 
@@ -210,9 +224,22 @@ function parseTsv(text) {
   return items;
 }
 
+// Remove intro/outro boilerplate the redesigned popjablues site now renders itself:
+// a leading "De playlist van deze …" intro and the trailing "Popjablues wordt elke
+// vrijdag … uitgezonden" broadcast line (plus any blank lines around them).
+function stripBoilerplate(text) {
+  const INTRO_RE = /^de playlist van /i;
+  const OUTRO_RE = /^popjablues wordt elke vrijdag/i;
+  const lines = (text || "").split(/\r?\n/);
+  while (lines.length && (clean(lines[0]) === "" || INTRO_RE.test(clean(lines[0])))) lines.shift();
+  while (lines.length && (clean(lines[lines.length - 1]) === "" || OUTRO_RE.test(clean(lines[lines.length - 1])))) lines.pop();
+  return lines.join("\n");
+}
+
 // Ordered items -> the editable popjablues-format text.
+// No intro/outro boilerplate: field 2 is just the numbered playlist + "Tijd voor …" headings.
 function itemsToText(items) {
-  const out = ["De playlist van deze Popjablues"];
+  const out = [];
   let n = 0;
   for (const it of items) {
     if (it.type === "heading") {
@@ -225,7 +252,6 @@ function itemsToText(items) {
       out.push(s);
     }
   }
-  out.push(OUTRO);
   return out.join("\n");
 }
 
@@ -274,19 +300,15 @@ const OUTRO = "Popjablues wordt elke vrijdag van 18.00-20.00 uur uitgezonden";
 
 function toHtml(parsed, opts) {
   const out = [];
-  if (parsed.intro.length) {
-    out.push("<p><b>" + esc(parsed.intro.join(" ")) + "</b></p>");   // titel: alleen bold, geen header
-  }
-  let n = 0, buf = [], hasOutro = false;
+  const intro = (opts.introText || "").trim();
+  if (intro) out.push("<p><b>" + esc(intro) + "</b></p>");   // inleidende tekst (veld 3), bold
+  let n = 0, buf = [];
   const flush = () => { if (buf.length) { out.push("<p>" + buf.join("<br>\n") + "</p>"); buf = []; } };
   for (const it of parsed.items) {
+    if (it.type === "outro") continue;                       // outro komt nu uit veld 3, niet uit de lijst
     if (it.type === "heading") {
       flush();
       out.push("<p><b><i>" + esc(it.text) + "</i></b></p>");   // "Tijd voor …" = bold italic
-    } else if (it.type === "outro") {
-      flush();
-      hasOutro = true;
-      out.push("<p><b>" + esc(it.text) + "</b></p>");
     } else {
       n++;
       const name = opts.boldArtist ? "<b>" + esc(it.artist) + "</b>" : esc(it.artist);
@@ -297,7 +319,8 @@ function toHtml(parsed, opts) {
     }
   }
   flush();
-  if (!hasOutro) out.push("<p><b>" + esc(OUTRO) + "</b></p>");  // always end with the broadcast line (bold)
+  const outro = (opts.outroText || "").trim();
+  if (outro) out.push("<p><b>" + esc(outro) + "</b></p>");   // afsluitende tekst (veld 3), bold
   return out.join("\n");
 }
 
@@ -309,7 +332,11 @@ const drop = $("drop"), textEl = $("text"), previewEl = $("preview"),
       htmlEl = $("html"), parseInfo = $("parseInfo");
 
 function currentOpts() {
-  return { boldArtist: $("boldArtist").checked };
+  return {
+    boldArtist: $("boldArtist").checked,
+    introText: $("introText").value,
+    outroText: $("outroText").value,
+  };
 }
 
 function refresh() {
@@ -355,7 +382,17 @@ $("clear").addEventListener("click", () => {
 });
 
 textEl.addEventListener("input", refresh);
+// Clean intro/outro boilerplate out of anything pasted directly into field 2.
+textEl.addEventListener("paste", () => {
+  setTimeout(() => {
+    const stripped = stripBoilerplate(textEl.value);
+    if (stripped !== textEl.value) textEl.value = stripped;
+    refresh();
+  }, 0);
+});
 $("boldArtist").addEventListener("change", refresh);
+$("introText").addEventListener("input", refresh);
+$("outroText").addEventListener("input", refresh);
 
 function copy(text, btnNote) {
   const done = () => { btnNote.hidden = false; setTimeout(() => btnNote.hidden = true, 1600); };
